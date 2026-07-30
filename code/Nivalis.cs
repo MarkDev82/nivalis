@@ -152,22 +152,35 @@ namespace NivalisApp
             trayMenu.Items.Add("🚪 Quit NIVALIS", null, delegate(object s, EventArgs e) { Application.Exit(); });
 
             trayIcon = new NotifyIcon();
-            trayIcon.Text = "NIVALIS - Thermal & Power Suite";
+            trayIcon.Text = "NIVALIS - Universal Thermal & Power Suite";
 
-            string icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\assets\logo.ico");
-            if (!File.Exists(icoPath))
+            // Robust Icon Extraction (Embedded EXE Icon + Fallback Multi-Path Search)
+            Icon appIcon = null;
+            try
             {
-                icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\assets\icon.ico");
+                appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             }
-            if (File.Exists(icoPath))
-            {
-                try { trayIcon.Icon = new Icon(icoPath); } catch { trayIcon.Icon = SystemIcons.Application; }
-            }
-            else
-            {
-                trayIcon.Icon = SystemIcons.Application;
-            }
+            catch { }
 
+            if (appIcon == null)
+            {
+                string[] candidateIcoPaths = new string[]
+                {
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\assets\logo.ico"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"assets\logo.ico"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"logo.ico")
+                };
+                foreach (string p in candidateIcoPaths)
+                {
+                    if (File.Exists(p))
+                    {
+                        try { appIcon = new Icon(p); break; } catch { }
+                    }
+                }
+            }
+            if (appIcon == null) appIcon = SystemIcons.Application;
+
+            trayIcon.Icon = appIcon;
             trayIcon.ContextMenuStrip = trayMenu;
             trayIcon.Visible = true;
             trayIcon.DoubleClick += delegate(object s, EventArgs e) { RestaurarVentana(); };
@@ -183,26 +196,35 @@ namespace NivalisApp
             this.BackColor = Color.FromArgb(11, 15, 25); // #0B0F19 Dark Midnight Slate
             this.Font = new Font("Segoe UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
 
-            string icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\assets\logo.ico");
-            if (!File.Exists(icoPath))
-            {
-                icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\assets\icon.ico");
-            }
-            if (File.Exists(icoPath))
-            {
-                try { this.Icon = new Icon(icoPath); } catch { }
-            }
+            Icon appIcon = null;
+            try { appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+            if (appIcon != null) this.Icon = appIcon;
 
             // Logo PNG
             pbLogo = new PictureBox();
             pbLogo.Size = new Size(52, 52);
             pbLogo.Location = new Point(25, 20);
             pbLogo.SizeMode = PictureBoxSizeMode.Zoom;
-            string pngPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\assets\logo.png");
-            if (File.Exists(pngPath))
+
+            Image logoImg = null;
+            string[] candidatePngPaths = new string[]
             {
-                try { pbLogo.Image = Image.FromFile(pngPath); } catch { }
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\assets\logo.png"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"assets\logo.png"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"logo.png")
+            };
+            foreach (string p in candidatePngPaths)
+            {
+                if (File.Exists(p))
+                {
+                    try { logoImg = Image.FromFile(p); break; } catch { }
+                }
             }
+            if (logoImg == null && appIcon != null)
+            {
+                try { logoImg = appIcon.ToBitmap(); } catch { }
+            }
+            pbLogo.Image = logoImg;
             this.Controls.Add(pbLogo);
 
             // Title
