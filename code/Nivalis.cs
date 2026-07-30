@@ -35,10 +35,6 @@ namespace NivalisApp
         [StructLayout(LayoutKind.Sequential)] public struct DISPLAYCONFIG_PATH_INFO { public DISPLAYCONFIG_PATH_SOURCE_INFO sourceInfo; public DISPLAYCONFIG_PATH_TARGET_INFO targetInfo; public uint flags; }
 
         public const int ENUM_CURRENT_SETTINGS = -1;
-        public const uint DM_BITSPERPEL = 0x00040000;
-        public const uint DM_PELSWIDTH = 0x00080000;
-        public const uint DM_PELSHEIGHT = 0x00100000;
-        public const uint DM_DISPLAYFREQUENCY = 0x00400000;
         public const int CDS_UPDATEREGISTRY = 0x00000001;
 
         public const uint QDC_ONLY_ACTIVE_PATHS = 0x00000002;
@@ -48,9 +44,6 @@ namespace NivalisApp
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern bool EnumDisplaySettingsW(string deviceName, int modeNum, ref DEVMODEW devMode);
-
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        public static extern int ChangeDisplaySettingsW(ref DEVMODEW devMode, int flags);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern int ChangeDisplaySettingsExW(string lpszDeviceName, ref DEVMODEW lpDevMode, IntPtr hwnd, int dwflags, IntPtr lParam);
@@ -468,7 +461,32 @@ namespace NivalisApp
         {
             try
             {
-                // Method 1: CCD API SetDisplayConfig with Administrator Rights
+                // Method 1: Search ALL enumerated display modes and find matching target Hz mode
+                int modeNum = 0;
+                DEVMODEW tempMode = new DEVMODEW();
+                tempMode.dmSize = (ushort)Marshal.SizeOf(typeof(DEVMODEW));
+                DEVMODEW bestMatch = new DEVMODEW();
+                bestMatch.dmSize = (ushort)Marshal.SizeOf(typeof(DEVMODEW));
+                bool found = false;
+
+                while (EnumDisplaySettingsW(@"\\.\DISPLAY1", modeNum, ref tempMode))
+                {
+                    if (tempMode.dmPelsWidth == 1920 && tempMode.dmPelsHeight == 1080 && tempMode.dmDisplayFrequency == targetHz)
+                    {
+                        bestMatch = tempMode;
+                        found = true;
+                        break;
+                    }
+                    modeNum++;
+                }
+
+                if (found)
+                {
+                    ChangeDisplaySettingsExW(@"\\.\DISPLAY1", ref bestMatch, IntPtr.Zero, CDS_UPDATEREGISTRY, IntPtr.Zero);
+                    ChangeDisplaySettingsExW(null, ref bestMatch, IntPtr.Zero, CDS_UPDATEREGISTRY, IntPtr.Zero);
+                }
+
+                // Method 2: CCD API Backup
                 uint pathCount = 0;
                 uint modeCount = 0;
                 if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, out pathCount, out modeCount) == 0 && pathCount > 0)
@@ -481,27 +499,6 @@ namespace NivalisApp
                         paths[0].targetInfo.refreshRate.Denominator = 1000;
                         uint setFlags = SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES;
                         SetDisplayConfig(pathCount, paths, modeCount, modes, setFlags);
-                    }
-                }
-
-                // Method 2: Win32 DEVMODEW Direct Registry Switch (Exact matching from step 7)
-                DEVMODEW currentMode = new DEVMODEW();
-                currentMode.dmSize = (ushort)Marshal.SizeOf(typeof(DEVMODEW));
-                if (EnumDisplaySettingsW(@"\\.\DISPLAY1", ENUM_CURRENT_SETTINGS, ref currentMode))
-                {
-                    int modeNum = 0;
-                    DEVMODEW tempMode = new DEVMODEW();
-                    tempMode.dmSize = (ushort)Marshal.SizeOf(typeof(DEVMODEW));
-                    while (EnumDisplaySettingsW(@"\\.\DISPLAY1", modeNum, ref tempMode))
-                    {
-                        if (tempMode.dmPelsWidth == currentMode.dmPelsWidth &&
-                            tempMode.dmPelsHeight == currentMode.dmPelsHeight &&
-                            tempMode.dmDisplayFrequency == targetHz)
-                        {
-                            ChangeDisplaySettingsExW(@"\\.\DISPLAY1", ref tempMode, IntPtr.Zero, CDS_UPDATEREGISTRY, IntPtr.Zero);
-                            break;
-                        }
-                        modeNum++;
                     }
                 }
             }
