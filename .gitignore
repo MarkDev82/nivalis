@@ -1,0 +1,20 @@
+# IDE & System Files
+.vs/
+.idea/
+*.user
+*.suo
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.log
+node_modules/
+dist/
+code/node_modules/
+code/dist/
+output/win-unpacked/
+output/build/
+
+# Scratch & test scripts
+scratch/
