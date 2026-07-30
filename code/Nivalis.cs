@@ -91,8 +91,12 @@ namespace NivalisApp
         static string SYSCOOLPOL = "94d3a615-a899-4ac5-ae2b-e4d8f634367f";
         static string POWER_SAVER_GUID = "a1841308-3541-4fab-bc81-f71556f20b4a";
         static string HIGH_PERF_GUID = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
+        static string BALANCED_GUID = "381b4222-f694-41f0-9685-ff5bb260df2e";
 
         private double originalHz = 144.0;
+        private string originalPowerSchemeGuid = "381b4222-f694-41f0-9685-ff5bb260df2e";
+        private bool isEcoActive = false;
+
         private NotifyIcon trayIcon;
         private ContextMenuStrip trayMenu;
         private PictureBox pbLogo;
@@ -126,19 +130,39 @@ namespace NivalisApp
 
         public MainForm()
         {
-            GuardarHzOriginales();
+            GuardarEstadoInicial();
             InitializeTrayIcon();
             InitializeComponent();
             ActualizarEstado();
         }
 
-        private void GuardarHzOriginales()
+        private void GuardarEstadoInicial()
         {
             double current = GetCurrentMonitorHz();
             if (current > 30)
             {
                 originalHz = current;
             }
+
+            try
+            {
+                string outScheme = RunPowerCfgWithOutput("/getactivescheme");
+                int colon = outScheme.IndexOf(':');
+                int paren = outScheme.IndexOf('(');
+                if (colon >= 0 && paren > colon)
+                {
+                    string g = outScheme.Substring(colon + 1, paren - colon - 1).Trim();
+                    if (g.Length >= 20)
+                    {
+                        originalPowerSchemeGuid = g;
+                    }
+                }
+                if (outScheme.Contains(POWER_SAVER_GUID))
+                {
+                    isEcoActive = true;
+                }
+            }
+            catch { }
         }
 
         private void InitializeTrayIcon()
@@ -451,6 +475,8 @@ namespace NivalisApp
 
         private void BtnActivarEco_Click(object sender, EventArgs e)
         {
+            isEcoActive = true;
+
             // 1. CPU
             if (chkCpu.Checked)
             {
@@ -483,14 +509,22 @@ namespace NivalisApp
 
         private void BtnActivarNormal_Click(object sender, EventArgs e)
         {
+            isEcoActive = false;
+
             // 1. CPU
             if (chkCpu.Checked)
             {
-                RunPowerCfg(string.Format("/setactive {0}", HIGH_PERF_GUID));
-                RunPowerCfg(string.Format("/setacvalueindex {0} {1} {2} 100", HIGH_PERF_GUID, SUB_PROCESSOR, PROCMAX));
-                RunPowerCfg(string.Format("/setdcvalueindex {0} {1} {2} 100", HIGH_PERF_GUID, SUB_PROCESSOR, PROCMAX));
-                RunPowerCfg(string.Format("/setacvalueindex {0} {1} {2} 1", HIGH_PERF_GUID, SUB_PROCESSOR, SYSCOOLPOL));
-                RunPowerCfg(string.Format("/setactive {0}", HIGH_PERF_GUID));
+                if (!string.IsNullOrEmpty(originalPowerSchemeGuid) && originalPowerSchemeGuid != POWER_SAVER_GUID)
+                {
+                    RunPowerCfg(string.Format("/setactive {0}", originalPowerSchemeGuid));
+                }
+                else
+                {
+                    RunPowerCfg(string.Format("/setactive {0}", BALANCED_GUID));
+                    RunPowerCfg(string.Format("/setactive {0}", HIGH_PERF_GUID));
+                }
+                RunPowerCfg(string.Format("/setacvalueindex {0} {1} {2} 100", BALANCED_GUID, SUB_PROCESSOR, PROCMAX));
+                RunPowerCfg(string.Format("/setacvalueindex {0} {1} {2} 1", BALANCED_GUID, SUB_PROCESSOR, SYSCOOLPOL));
             }
 
             // 2. GPU
@@ -569,7 +603,14 @@ namespace NivalisApp
             string output = RunPowerCfgWithOutput("/getactivescheme");
             int currentHz = (int)Math.Round(GetCurrentMonitorHz());
 
-            if (output.Contains(POWER_SAVER_GUID))
+            bool ecoNow = isEcoActive;
+            if (!ecoNow && output.Contains(POWER_SAVER_GUID))
+            {
+                // If powercfg says power saver, double check
+                ecoNow = true;
+            }
+
+            if (ecoNow)
             {
                 lblBadgeStatus.Text = "❄️ NIVALIS ECO MODE (ACTIVE)";
                 lblBadgeStatus.ForeColor = Color.FromArgb(56, 189, 248); // #38BDF8
@@ -585,7 +626,7 @@ namespace NivalisApp
                 lblBadgeStatus.Text = "🔥 PERFORMANCE MODE (ACTIVE)";
                 lblBadgeStatus.ForeColor = Color.FromArgb(96, 165, 250); // #60A5FA
 
-                lblCpuDetails.Text = chkCpu.Checked ? "High Performance  |  Max Frequency 100%  |  Active Cooling" : "CPU Management Disabled (Unchecked)";
+                lblCpuDetails.Text = chkCpu.Checked ? "High Performance / Balanced  |  Max Frequency 100%  |  Active Cooling" : "CPU Management Disabled (Unchecked)";
                 lblGpuDetails.Text = chkGpu.Checked ? "Power Limit 125W  (Factory Default / Full Power)" : "GPU Management Disabled (Unchecked)";
                 lblMonitorDetails.Text = string.Format("{0} Hz  {1}", currentHz, chkHz.Checked ? "(Normal Refresh Rate)" : "(Color Profile Intact)");
 
