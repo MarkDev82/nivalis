@@ -50,6 +50,9 @@ namespace NivalisApp
         public static extern bool EnumDisplaySettingsW(string deviceName, int modeNum, ref DEVMODEW devMode);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int ChangeDisplaySettingsW(ref DEVMODEW devMode, int flags);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern int ChangeDisplaySettingsExW(string lpszDeviceName, ref DEVMODEW lpDevMode, IntPtr hwnd, int dwflags, IntPtr lParam);
 
         [DllImport("user32.dll")]
@@ -481,7 +484,7 @@ namespace NivalisApp
                     }
                 }
 
-                // Method 2: Win32 DEVMODEW Direct Registry Switch
+                // Method 2: Win32 DEVMODEW Direct Registry Switch (Exact matching from step 7)
                 DEVMODEW currentMode = new DEVMODEW();
                 currentMode.dmSize = (ushort)Marshal.SizeOf(typeof(DEVMODEW));
                 if (EnumDisplaySettingsW(@"\\.\DISPLAY1", ENUM_CURRENT_SETTINGS, ref currentMode))
