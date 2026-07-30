@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Media;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -10,6 +11,56 @@ namespace NivalisApp
 {
     public class MainForm : Form
     {
+        // Struct Win32 DEVMODEW
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct DEVMODEW
+        {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+            public ushort dmSpecVersion; public ushort dmDriverVersion; public ushort dmSize; public ushort dmDriverExtra;
+            public uint dmFields; public int dmPositionX; public int dmPositionY; public uint dmDisplayOrientation;
+            public uint dmDisplayFixedOutput; public short dmColor; public short dmDuplex; public short dmYResolution;
+            public short dmTTOption; public short dmCollate;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+            public ushort dmLogPixels; public uint dmBitsPerPel; public uint dmPelsWidth; public uint dmPelsHeight;
+            public uint dmDisplayFlags; public uint dmDisplayFrequency;
+            public uint dmICMMethod; public uint dmICMIntent; public uint dmMediaType; public uint dmDCOpenGLFlags;
+            public uint dmReserved1; public uint dmReserved2; public uint dmPanningWidth; public uint dmPanningHeight;
+        }
+
+        // Interop CCD API
+        [StructLayout(LayoutKind.Sequential)] public struct LUID { public uint LowPart; public int HighPart; }
+        [StructLayout(LayoutKind.Sequential)] public struct DISPLAYCONFIG_RATIONAL { public uint Numerator; public uint Denominator; }
+        [StructLayout(LayoutKind.Sequential)] public struct DISPLAYCONFIG_PATH_SOURCE_INFO { public LUID adapterId; public uint id; public uint modeInfoIdx; public uint statusFlags; }
+        [StructLayout(LayoutKind.Sequential)] public struct DISPLAYCONFIG_PATH_TARGET_INFO { public LUID adapterId; public uint id; public uint modeInfoIdx; public uint outputTechnology; public uint rotation; public uint scaling; public DISPLAYCONFIG_RATIONAL refreshRate; public uint scanLineOrdering; public bool targetAvailable; public uint statusFlags; }
+        [StructLayout(LayoutKind.Sequential)] public struct DISPLAYCONFIG_PATH_INFO { public DISPLAYCONFIG_PATH_SOURCE_INFO sourceInfo; public DISPLAYCONFIG_PATH_TARGET_INFO targetInfo; public uint flags; }
+
+        public const int ENUM_CURRENT_SETTINGS = -1;
+        public const uint DM_BITSPERPEL = 0x00040000;
+        public const uint DM_PELSWIDTH = 0x00080000;
+        public const uint DM_PELSHEIGHT = 0x00100000;
+        public const uint DM_DISPLAYFREQUENCY = 0x00400000;
+        public const int CDS_UPDATEREGISTRY = 0x00000001;
+
+        public const uint QDC_ONLY_ACTIVE_PATHS = 0x00000002;
+        public const uint SDC_APPLY = 0x00000080;
+        public const uint SDC_USE_SUPPLIED_DISPLAY_CONFIG = 0x00000020;
+        public const uint SDC_ALLOW_CHANGES = 0x00000400;
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern bool EnumDisplaySettingsW(string deviceName, int modeNum, ref DEVMODEW devMode);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int ChangeDisplaySettingsExW(string lpszDeviceName, ref DEVMODEW lpDevMode, IntPtr hwnd, int dwflags, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        public static extern int GetDisplayConfigBufferSizes(uint flags, out uint p, out uint m);
+
+        [DllImport("user32.dll")]
+        public static extern int QueryDisplayConfig(uint flags, ref uint p, [Out] DISPLAYCONFIG_PATH_INFO[] paths, ref uint m, byte[] modes, IntPtr t);
+
+        [DllImport("user32.dll")]
+        public static extern int SetDisplayConfig(uint numPathArrayElements, [In] DISPLAYCONFIG_PATH_INFO[] pathArray, uint numModeInfoArrayElements, byte[] modeInfoArray, uint flags);
+
         // PowerCFG GUIDs
         static string SUB_PROCESSOR = "54533251-82be-4824-96c1-47b60b740d00";
         static string PROCMIN = "893de800-450c-4634-b3d1-af4fad038096";
@@ -19,6 +70,7 @@ namespace NivalisApp
         static string HIGH_PERF_GUID = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
         static string BALANCED_GUID = "381b4222-f694-41f0-9685-ff5bb260df2e";
 
+        private double originalHz = 144.0;
         private string originalPowerSchemeGuid = "381b4222-f694-41f0-9685-ff5bb260df2e";
         private bool isEcoActive = false;
 
@@ -39,6 +91,10 @@ namespace NivalisApp
         private Label lblGpuHeader;
         private Label lblGpuDetails;
 
+        private Panel pnlCardMonitor;
+        private Label lblMonitorHeader;
+        private Label lblMonitorDetails;
+
         private Button btnActivarEco;
         private Button btnActivarNormal;
         private Label lblFooterNote;
@@ -54,6 +110,12 @@ namespace NivalisApp
 
         private void GuardarEstadoInicial()
         {
+            double current = GetCurrentMonitorHz();
+            if (current > 30)
+            {
+                originalHz = current;
+            }
+
             try
             {
                 string outScheme = RunPowerCfgWithOutput("/getactivescheme");
@@ -137,8 +199,8 @@ namespace NivalisApp
 
         private void InitializeComponent()
         {
-            this.Text = "NIVALIS - Thermal & Power Suite";
-            this.Size = new Size(560, 520);
+            this.Text = "NIVALIS - Universal Thermal & Power Suite";
+            this.Size = new Size(560, 580);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
@@ -187,7 +249,7 @@ namespace NivalisApp
 
             // Subtitle
             lblSubtitle = new Label();
-            lblSubtitle.Text = "Thermal & Power Management Suite";
+            lblSubtitle.Text = "Universal Thermal & Power Management Suite";
             lblSubtitle.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
             lblSubtitle.ForeColor = Color.FromArgb(148, 163, 184); // #94A3B8
             lblSubtitle.Location = new Point(90, 48);
@@ -209,25 +271,33 @@ namespace NivalisApp
             pnlBadge.Controls.Add(lblBadgeStatus);
 
             // CPU Card
-            pnlCardCpu = CrearTarjeta(25, 152, 494, 62);
+            pnlCardCpu = CrearTarjeta(25, 150, 494, 60);
             this.Controls.Add(pnlCardCpu);
             lblCpuHeader = CrearLabelHeader("PROCESSOR (CPU THERMAL ENGINE)", 14, 8);
             pnlCardCpu.Controls.Add(lblCpuHeader);
-            lblCpuDetails = CrearLabelDetails("Loading details...", 14, 30);
+            lblCpuDetails = CrearLabelDetails("Loading details...", 14, 28);
             pnlCardCpu.Controls.Add(lblCpuDetails);
 
             // GPU Card
-            pnlCardGpu = CrearTarjeta(25, 226, 494, 62);
+            pnlCardGpu = CrearTarjeta(25, 220, 494, 60);
             this.Controls.Add(pnlCardGpu);
             lblGpuHeader = CrearLabelHeader("GRAPHICS (NVIDIA GTX 1660 SUPER)", 14, 8);
             pnlCardGpu.Controls.Add(lblGpuHeader);
-            lblGpuDetails = CrearLabelDetails("Loading details...", 14, 30);
+            lblGpuDetails = CrearLabelDetails("Loading details...", 14, 28);
             pnlCardGpu.Controls.Add(lblGpuDetails);
+
+            // Monitor Card
+            pnlCardMonitor = CrearTarjeta(25, 290, 494, 60);
+            this.Controls.Add(pnlCardMonitor);
+            lblMonitorHeader = CrearLabelHeader("DISPLAY MONITOR (ZOWIE REFRESH RATE)", 14, 8);
+            pnlCardMonitor.Controls.Add(lblMonitorHeader);
+            lblMonitorDetails = CrearLabelDetails("Loading details...", 14, 28);
+            pnlCardMonitor.Controls.Add(lblMonitorDetails);
 
             // Eco Mode Button
             btnActivarEco = new Button();
             btnActivarEco.Text = "🌙 ENABLE ECO MODE (Cool & Quiet)";
-            btnActivarEco.Location = new Point(25, 305);
+            btnActivarEco.Location = new Point(25, 365);
             btnActivarEco.Size = new Size(494, 52);
             btnActivarEco.BackColor = Color.FromArgb(14, 165, 233); // #0EA5E9
             btnActivarEco.ForeColor = Color.White;
@@ -241,7 +311,7 @@ namespace NivalisApp
             // Normal Mode Button
             btnActivarNormal = new Button();
             btnActivarNormal.Text = "⚡ ENABLE NORMAL MODE (Full Power)";
-            btnActivarNormal.Location = new Point(25, 370);
+            btnActivarNormal.Location = new Point(25, 430);
             btnActivarNormal.Size = new Size(494, 52);
             btnActivarNormal.BackColor = Color.FromArgb(59, 130, 246); // #3B82F6
             btnActivarNormal.ForeColor = Color.White;
@@ -257,7 +327,7 @@ namespace NivalisApp
             lblFooterNote.Text = "🛡️ Runs automatically at Windows startup. Settings reset to defaults on reboot.";
             lblFooterNote.ForeColor = Color.FromArgb(148, 163, 184);
             lblFooterNote.Font = new Font("Segoe UI", 8.5F, FontStyle.Italic);
-            lblFooterNote.Location = new Point(25, 436);
+            lblFooterNote.Location = new Point(25, 498);
             lblFooterNote.AutoSize = true;
             this.Controls.Add(lblFooterNote);
 
@@ -328,7 +398,10 @@ namespace NivalisApp
             // 2. GPU Power Limit (NVIDIA GTX 1660 SUPER 70W Cap)
             RunNvidiaSmi("-pl 70");
 
-            // 3. Audio Chime
+            // 3. Display Refresh Rate to 60 Hz
+            SetMonitorHz(60);
+
+            // 4. Audio Chime
             ReproducirSonidoEco();
 
             ActualizarEstado();
@@ -354,15 +427,88 @@ namespace NivalisApp
             // 2. GPU Power Limit (125W Factory Default)
             RunNvidiaSmi("-pl 125");
 
-            // 3. Audio Chime
+            // 3. Display Refresh Rate to 144 Hz (or original Hz)
+            SetMonitorHz((int)Math.Round(originalHz));
+
+            // 4. Audio Chime
             ReproducirSonidoNormal();
 
             ActualizarEstado();
         }
 
+        private double GetCurrentMonitorHz()
+        {
+            try
+            {
+                uint pathCount = 0;
+                uint modeCount = 0;
+                if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, out pathCount, out modeCount) == 0 && pathCount > 0)
+                {
+                    DISPLAYCONFIG_PATH_INFO[] paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
+                    byte[] modes = new byte[modeCount * 64];
+                    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) == 0 && pathCount > 0)
+                    {
+                        uint num = paths[0].targetInfo.refreshRate.Numerator;
+                        uint den = paths[0].targetInfo.refreshRate.Denominator;
+                        if (den > 0)
+                        {
+                            return Math.Round(num / (double)den);
+                        }
+                    }
+                }
+            }
+            catch { }
+            return 144.0;
+        }
+
+        private void SetMonitorHz(int targetHz)
+        {
+            try
+            {
+                // Method 1: CCD API SetDisplayConfig with Administrator Rights
+                uint pathCount = 0;
+                uint modeCount = 0;
+                if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, out pathCount, out modeCount) == 0 && pathCount > 0)
+                {
+                    DISPLAYCONFIG_PATH_INFO[] paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
+                    byte[] modes = new byte[modeCount * 64];
+                    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) == 0 && pathCount > 0)
+                    {
+                        paths[0].targetInfo.refreshRate.Numerator = (uint)(targetHz * 1000);
+                        paths[0].targetInfo.refreshRate.Denominator = 1000;
+                        uint setFlags = SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES;
+                        SetDisplayConfig(pathCount, paths, modeCount, modes, setFlags);
+                    }
+                }
+
+                // Method 2: Win32 DEVMODEW Direct Registry Switch
+                DEVMODEW currentMode = new DEVMODEW();
+                currentMode.dmSize = (ushort)Marshal.SizeOf(typeof(DEVMODEW));
+                if (EnumDisplaySettingsW(@"\\.\DISPLAY1", ENUM_CURRENT_SETTINGS, ref currentMode))
+                {
+                    int modeNum = 0;
+                    DEVMODEW tempMode = new DEVMODEW();
+                    tempMode.dmSize = (ushort)Marshal.SizeOf(typeof(DEVMODEW));
+                    while (EnumDisplaySettingsW(@"\\.\DISPLAY1", modeNum, ref tempMode))
+                    {
+                        if (tempMode.dmPelsWidth == currentMode.dmPelsWidth &&
+                            tempMode.dmPelsHeight == currentMode.dmPelsHeight &&
+                            tempMode.dmDisplayFrequency == targetHz)
+                        {
+                            ChangeDisplaySettingsExW(@"\\.\DISPLAY1", ref tempMode, IntPtr.Zero, CDS_UPDATEREGISTRY, IntPtr.Zero);
+                            break;
+                        }
+                        modeNum++;
+                    }
+                }
+            }
+            catch { }
+        }
+
         private void ActualizarEstado()
         {
             string output = RunPowerCfgWithOutput("/getactivescheme");
+            int currentHz = (int)Math.Round(GetCurrentMonitorHz());
 
             bool ecoNow = isEcoActive;
             if (!ecoNow && output.Contains(POWER_SAVER_GUID))
@@ -377,8 +523,9 @@ namespace NivalisApp
 
                 lblCpuDetails.Text = "Power Saver Plan  |  Max Frequency 75%  |  Passive Silent Cooling";
                 lblGpuDetails.Text = "Power Limit 70W  (44% Reduced Heat & Consumption)";
+                lblMonitorDetails.Text = string.Format("{0} Hz  (Eco 60 Hz Refresh Rate)", currentHz);
 
-                trayIcon.Text = "NIVALIS - Eco Mode (70W Limit | Silent Cooling)";
+                trayIcon.Text = string.Format("NIVALIS - Eco Mode ({0}Hz | 70W Cap)", currentHz);
             }
             else
             {
@@ -387,8 +534,9 @@ namespace NivalisApp
 
                 lblCpuDetails.Text = "High Performance / Balanced  |  Max Frequency 100%  |  Active Cooling";
                 lblGpuDetails.Text = "Power Limit 125W  (Factory Default / Full Power)";
+                lblMonitorDetails.Text = string.Format("{0} Hz  (Normal 144 Hz Refresh Rate)", currentHz);
 
-                trayIcon.Text = "NIVALIS - Normal Mode (125W Default | Full Power)";
+                trayIcon.Text = string.Format("NIVALIS - Normal Mode ({0}Hz | 125W Default)", currentHz);
             }
         }
 
